@@ -24,12 +24,14 @@ export const db = getFirestore(app)
 export const storage = getStorage(app)
 
 // Initialize Analytics only in browser environment
+// Initialize Analytics only in browser environment
 export const analytics =
-  typeof window !== "undefined" && typeof window.gtag !== "undefined"
+  typeof window !== "undefined"
     ? (async () => {
-        const { getAnalytics } = await import("firebase/analytics")
-        return getAnalytics(app)
+        const { getAnalytics } = await import("firebase/analytics");
+        return getAnalytics(app);
       })()
-    : null
+    : null;
+
 
 export default app

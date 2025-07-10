@@ -23,7 +23,8 @@ export function AdminProtectedRoute({ children }: AdminProtectedRouteProps) {
 
       // Check if user is admin (you can customize this logic)
       // For now, we'll check if email contains "admin" or if there's an admin role
-      const isAdmin = user.email?.includes("admin") || userProfile?.role === "admin"
+      // const isAdmin = user.email?.includes("admin") || userProfile?.role === "admin"
+     const isAdmin = user.email?.includes("mooviencehq+me") 
 
       if (!isAdmin) {
         router.push("/dashboard")
@@ -47,7 +48,8 @@ export function AdminProtectedRoute({ children }: AdminProtectedRouteProps) {
     return null
   }
 
-  const isAdmin = user.email?.includes("admin") || userProfile?.role === "admin"
+  // const isAdmin = user.email?.includes("admin") || userProfile?.role === "admin"
+   const isAdmin = user.email?.includes("mooviencehq+me") 
 
   if (!isAdmin) {
     return (

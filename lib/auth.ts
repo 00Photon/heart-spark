@@ -1,65 +1,53 @@
+import { auth, db } from "@/lib/firebase";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  signOut,
-  sendPasswordResetEmail,
-  updateProfile,
-  type User,
+  signInWithPopup,
   GoogleAuthProvider,
   FacebookAuthProvider,
-  signInWithPopup,
+  updateProfile,
   sendEmailVerification,
-  updatePassword,
-  reauthenticateWithCredential,
+  signOut,
+  sendPasswordResetEmail,
   EmailAuthProvider,
-} from "firebase/auth"
-import { doc, setDoc, getDoc, updateDoc } from "firebase/firestore"
-import { auth, db } from "./firebase"
+  reauthenticateWithCredential,
+  updatePassword,
+  User,
+} from "firebase/auth";
+import { doc, setDoc, getDoc, updateDoc } from "firebase/firestore";
 
-// Types
-export interface UserProfile {
-  uid: string
-  email: string
-  firstName: string
-  lastName: string
-  birthDate: string
-  location: string
-  zodiacSign?: string
-  profileComplete: boolean
-  createdAt: Date
-  lastActive: Date
+// Interface for signup data
+interface SignUpData {
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+  birthDate: string;
+  location: string;
 }
 
-export interface SignUpData {
-  firstName: string
-  lastName: string
-  email: string
-  password: string
-  birthDate: string
-  location: string
-}
-
-// Initialize emulators in development (optional)
-if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
-  try {
-    // Only connect if not already connected
-    if (!auth.config.emulator) {
-      // connectAuthEmulator(auth, "http://localhost:9099")
-    }
-    // if (!db._delegate._databaseId.projectId.includes("demo-")) {
-    //   connectFirestoreEmulator(db, "localhost", 8080)
-    // }
-  } catch (error) {
-    // Emulators already connected or not available
-    console.log("Firebase emulators not connected:", error)
-  }
+// Interface for user profile
+interface UserProfile {
+  uid: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  birthDate?: string;
+  location?: string;
+  zodiacSign?: string;
+  profileComplete: boolean;
+  createdAt: Date | string;
+  lastActive: Date | string;
 }
 
 // Calculate zodiac sign from birth date
 function calculateZodiacSign(birthDate: string): string {
-  const date = new Date(birthDate)
-  const month = date.getMonth() + 1
-  const day = date.getDate()
+  const date = new Date(birthDate);
+  if (isNaN(date.getTime())) {
+    throw new Error("Invalid birth date");
+  }
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
 
   const zodiacSigns = [
     { sign: "Capricorn ♑", start: [12, 22], end: [1, 19] },
@@ -74,38 +62,45 @@ function calculateZodiacSign(birthDate: string): string {
     { sign: "Libra ♎", start: [9, 23], end: [10, 22] },
     { sign: "Scorpio ♏", start: [10, 23], end: [11, 21] },
     { sign: "Sagittarius ♐", start: [11, 22], end: [12, 21] },
-  ]
+  ];
 
   for (const zodiac of zodiacSigns) {
-    const [startMonth, startDay] = zodiac.start
-    const [endMonth, endDay] = zodiac.end
+    const [startMonth, startDay] = zodiac.start;
+    const [endMonth, endDay] = zodiac.end;
 
     if ((month === startMonth && day >= startDay) || (month === endMonth && day <= endDay)) {
-      return zodiac.sign
+      return zodiac.sign;
     }
   }
 
-  return "Capricorn ♑" // Default fallback
+  throw new Error("Unable to determine zodiac sign");
 }
 
 // Sign up with email and password
 export async function signUpWithEmail(userData: SignUpData): Promise<User> {
   try {
-    const { email, password, firstName, lastName, birthDate, location } = userData
+    console.log("Starting email signup for:", userData.email);
+    const { email, password, firstName, lastName, birthDate, location } = userData;
 
-    // Create user account
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password)
-    const user = userCredential.user
+    // Validate inputs
+    if (!email || !firstName || !lastName || !birthDate || !location) {
+      throw new Error("All fields are required");
+    }
+    if (isNaN(new Date(birthDate).getTime())) {
+      throw new Error("Invalid birth date");
+    }
 
-    // Update user profile
-    await updateProfile(user, {
-      displayName: `${firstName} ${lastName}`,
-    })
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+    console.log("User created, UID:", user.uid);
 
-    // Calculate zodiac sign
-    const zodiacSign = calculateZodiacSign(birthDate)
+    console.log("Updating Firebase profile...");
+    await updateProfile(user, { displayName: `${firstName} ${lastName}` });
 
-    // Create user profile in Firestore
+    console.log("Calculating zodiac sign...");
+    const zodiacSign = calculateZodiacSign(birthDate);
+
+    console.log("Writing user profile to Firestore...");
     const userProfile: UserProfile = {
       uid: user.uid,
       email: user.email!,
@@ -117,46 +112,47 @@ export async function signUpWithEmail(userData: SignUpData): Promise<User> {
       profileComplete: false,
       createdAt: new Date(),
       lastActive: new Date(),
-    }
+    };
+    await setDoc(doc(db, "users", user.uid), userProfile);
+    console.log("User profile written");
 
-    await setDoc(doc(db, "users", user.uid), userProfile)
+    console.log("Sending email verification...");
+    await sendEmailVerification(user);
+    console.log("Email verification sent");
 
-    // Send email verification
-    await sendEmailVerification(user)
-
-    return user
+    return user;
   } catch (error: any) {
-    console.error("Sign up error:", error)
-    throw new Error(getAuthErrorMessage(error.code))
+    console.error("SignUpWithEmail error:", error.code, error.message);
+    throw new Error(getAuthErrorMessage(error.code));
   }
 }
 
 // Sign in with email and password
 export async function signInWithEmail(email: string, password: string): Promise<User> {
   try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password)
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
 
     // Update last active timestamp
     await updateDoc(doc(db, "users", userCredential.user.uid), {
       lastActive: new Date(),
-    })
+    });
 
-    return userCredential.user
+    return userCredential.user;
   } catch (error: any) {
-    console.error("Sign in error:", error)
-    throw new Error(getAuthErrorMessage(error.code))
+    console.error("Sign in error:", error);
+    throw new Error(getAuthErrorMessage(error.code));
   }
 }
 
 // Sign in with Google
 export async function signInWithGoogle(): Promise<User> {
   try {
-    const provider = new GoogleAuthProvider()
-    const userCredential = await signInWithPopup(auth, provider)
-    const user = userCredential.user
+    const provider = new GoogleAuthProvider();
+    const userCredential = await signInWithPopup(auth, provider);
+    const user = userCredential.user;
 
     // Check if user profile exists
-    const userDoc = await getDoc(doc(db, "users", user.uid))
+    const userDoc = await getDoc(doc(db, "users", user.uid));
 
     if (!userDoc.exists()) {
       // Create new user profile
@@ -168,32 +164,32 @@ export async function signInWithGoogle(): Promise<User> {
         profileComplete: false,
         createdAt: new Date(),
         lastActive: new Date(),
-      }
+      };
 
-      await setDoc(doc(db, "users", user.uid), userProfile)
+      await setDoc(doc(db, "users", user.uid), userProfile);
     } else {
       // Update last active
       await updateDoc(doc(db, "users", user.uid), {
         lastActive: new Date(),
-      })
+      });
     }
 
-    return user
+    return user;
   } catch (error: any) {
-    console.error("Google sign in error:", error)
-    throw new Error(getAuthErrorMessage(error.code))
+    console.error("Google sign in error:", error);
+    throw new Error(getAuthErrorMessage(error.code));
   }
 }
 
 // Sign in with Facebook
 export async function signInWithFacebook(): Promise<User> {
   try {
-    const provider = new FacebookAuthProvider()
-    const userCredential = await signInWithPopup(auth, provider)
-    const user = userCredential.user
+    const provider = new FacebookAuthProvider();
+    const userCredential = await signInWithPopup(auth, provider);
+    const user = userCredential.user;
 
     // Check if user profile exists
-    const userDoc = await getDoc(doc(db, "users", user.uid))
+    const userDoc = await getDoc(doc(db, "users", user.uid));
 
     if (!userDoc.exists()) {
       // Create new user profile
@@ -205,74 +201,74 @@ export async function signInWithFacebook(): Promise<User> {
         profileComplete: false,
         createdAt: new Date(),
         lastActive: new Date(),
-      }
+      };
 
-      await setDoc(doc(db, "users", user.uid), userProfile)
+      await setDoc(doc(db, "users", user.uid), userProfile);
     } else {
       // Update last active
       await updateDoc(doc(db, "users", user.uid), {
         lastActive: new Date(),
-      })
+      });
     }
 
-    return user
+    return user;
   } catch (error: any) {
-    console.error("Facebook sign in error:", error)
-    throw new Error(getAuthErrorMessage(error.code))
+    console.error("Facebook sign in error:", error);
+    throw new Error(getAuthErrorMessage(error.code));
   }
 }
 
 // Sign out
 export async function signOutUser(): Promise<void> {
   try {
-    await signOut(auth)
+    await signOut(auth);
   } catch (error: any) {
-    console.error("Sign out error:", error)
-    throw new Error("Failed to sign out")
+    console.error("Sign out error:", error);
+    throw new Error("Failed to sign out");
   }
 }
 
 // Send password reset email
 export async function resetPassword(email: string): Promise<void> {
   try {
-    await sendPasswordResetEmail(auth, email)
+    await sendPasswordResetEmail(auth, email);
   } catch (error: any) {
-    console.error("Password reset error:", error)
-    throw new Error(getAuthErrorMessage(error.code))
+    console.error("Password reset error:", error);
+    throw new Error(getAuthErrorMessage(error.code));
   }
 }
 
 // Update user password
 export async function updateUserPassword(currentPassword: string, newPassword: string): Promise<void> {
   try {
-    const user = auth.currentUser
+    const user = auth.currentUser;
     if (!user || !user.email) {
-      throw new Error("No authenticated user")
+      throw new Error("No authenticated user");
     }
 
     // Re-authenticate user
-    const credential = EmailAuthProvider.credential(user.email, currentPassword)
-    await reauthenticateWithCredential(user, credential)
+    const credential = EmailAuthProvider.credential(user.email, currentPassword);
+    await reauthenticateWithCredential(user, credential);
 
     // Update password
-    await updatePassword(user, newPassword)
+    await updatePassword(user, newPassword);
   } catch (error: any) {
-    console.error("Password update error:", error)
-    throw new Error(getAuthErrorMessage(error.code))
+    console.error("Password update error:", error);
+    throw new Error(getAuthErrorMessage(error.code));
   }
 }
 
 // Get user profile
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   try {
-    const userDoc = await getDoc(doc(db, "users", uid))
+    const userDoc = await getDoc(doc(db, "users", uid));
     if (userDoc.exists()) {
-      return userDoc.data() as UserProfile
+      return userDoc.data() as UserProfile;
     }
-    return null
+    return null;
   } catch (error) {
-    console.error("Get user profile error:", error)
-    return null
+    console.error("Get user profile error:", error);
+    return null;
   }
 }
 
@@ -282,10 +278,10 @@ export async function updateUserProfile(uid: string, updates: Partial<UserProfil
     await updateDoc(doc(db, "users", uid), {
       ...updates,
       lastActive: new Date(),
-    })
+    });
   } catch (error) {
-    console.error("Update user profile error:", error)
-    throw new Error("Failed to update profile")
+    console.error("Update user profile error:", error);
+    throw new Error("Failed to update profile");
   }
 }
 
@@ -293,24 +289,24 @@ export async function updateUserProfile(uid: string, updates: Partial<UserProfil
 function getAuthErrorMessage(errorCode: string): string {
   switch (errorCode) {
     case "auth/user-not-found":
-      return "No account found with this email address."
+      return "No account found with this email address.";
     case "auth/wrong-password":
-      return "Incorrect password."
+      return "Incorrect password.";
     case "auth/email-already-in-use":
-      return "An account with this email already exists."
+      return "An account with this email already exists.";
     case "auth/weak-password":
-      return "Password should be at least 6 characters."
+      return "Password should be at least 8 characters.";
     case "auth/invalid-email":
-      return "Invalid email address."
+      return "Invalid email address.";
     case "auth/too-many-requests":
-      return "Too many failed attempts. Please try again later."
+      return "Too many failed attempts. Please try again later.";
     case "auth/network-request-failed":
-      return "Network error. Please check your connection."
+      return "Network error. Please check your connection.";
     case "auth/popup-closed-by-user":
-      return "Sign-in popup was closed."
+      return "Sign-in popup was closed.";
     case "auth/cancelled-popup-request":
-      return "Sign-in was cancelled."
+      return "Sign-in was cancelled.";
     default:
-      return "An error occurred. Please try again."
+      return "An error occurred. Please try again.";
   }
 }
