@@ -15,7 +15,12 @@ import {
   User,
 } from "firebase/auth";
 import { doc, setDoc, getDoc, updateDoc } from "firebase/firestore";
+// In @/lib/auth.ts
+import { ZODIAC_SIGNS } from "@/lib/constants"; // Adjust path as needed
 
+import { storage } from "@/lib/firebase";
+import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
+import { collection, addDoc, getDocs, deleteDoc } from "firebase/firestore";
 // Interface for signup data
 interface SignUpData {
   firstName: string;
@@ -25,55 +30,65 @@ interface SignUpData {
   birthDate: string;
   location: string;
 }
-
+// Interface for photo metadata
 // Interface for user profile
-interface UserProfile {
-  uid: string;
+export interface UserProfile {
+ uid: string;
   email: string;
   firstName: string;
   lastName: string;
   birthDate?: string;
   location?: string;
-  zodiacSign?: string;
+  zodiac?: string; // Stores zodiac name (e.g., "Libra")
+  occupation?: string;
+  education?: string;
+  bio?: string;
+  interests?: string[];
   profileComplete: boolean;
   createdAt: Date | string;
   lastActive: Date | string;
 }
 
-// Calculate zodiac sign from birth date
+
 function calculateZodiacSign(birthDate: string): string {
   const date = new Date(birthDate);
   if (isNaN(date.getTime())) {
     throw new Error("Invalid birth date");
   }
-  const month = date.getMonth() + 1;
+  const month = date.getMonth() + 1; // 1-12
   const day = date.getDate();
 
-  const zodiacSigns = [
-    { sign: "Capricorn ♑", start: [12, 22], end: [1, 19] },
-    { sign: "Aquarius ♒", start: [1, 20], end: [2, 18] },
-    { sign: "Pisces ♓", start: [2, 19], end: [3, 20] },
-    { sign: "Aries ♈", start: [3, 21], end: [4, 19] },
-    { sign: "Taurus ♉", start: [4, 20], end: [5, 20] },
-    { sign: "Gemini ♊", start: [5, 21], end: [6, 20] },
-    { sign: "Cancer ♋", start: [6, 21], end: [7, 22] },
-    { sign: "Leo ♌", start: [7, 23], end: [8, 22] },
-    { sign: "Virgo ♍", start: [8, 23], end: [9, 22] },
-    { sign: "Libra ♎", start: [9, 23], end: [10, 22] },
-    { sign: "Scorpio ♏", start: [10, 23], end: [11, 21] },
-    { sign: "Sagittarius ♐", start: [11, 22], end: [12, 21] },
-  ];
+  for (const zodiac of ZODIAC_SIGNS) {
+    const [startDate, endDate] = zodiac.dates.split(" - ");
+    const [startMonthStr, startDayStr] = startDate.split(" ");
+    const [endMonthStr, endDayStr] = endDate.split(" ");
+    
+    const startMonth = getMonthNumber(startMonthStr);
+    const endMonth = getMonthNumber(endMonthStr);
+    const startDay = parseInt(startDayStr);
+    const endDay = parseInt(endDayStr);
 
-  for (const zodiac of zodiacSigns) {
-    const [startMonth, startDay] = zodiac.start;
-    const [endMonth, endDay] = zodiac.end;
-
-    if ((month === startMonth && day >= startDay) || (month === endMonth && day <= endDay)) {
-      return zodiac.sign;
+    if (
+      (month === startMonth && day >= startDay) ||
+      (month === endMonth && day <= endDay) ||
+      (startMonth > endMonth && (month > startMonth || month < endMonth)) ||
+      (startMonth > endMonth && month === startMonth && day >= startDay) ||
+      (startMonth > endMonth && month === endMonth && day <= endDay)
+    ) {
+      return zodiac.name;
     }
   }
 
   throw new Error("Unable to determine zodiac sign");
+}
+
+// Helper function to convert month name to number
+function getMonthNumber(monthStr: string): number {
+  const months: { [key: string]: number } = {
+    Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6,
+    Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12,
+  };
+  return months[monthStr] || 1;
 }
 
 // Sign up with email and password
@@ -98,7 +113,7 @@ export async function signUpWithEmail(userData: SignUpData): Promise<User> {
     await updateProfile(user, { displayName: `${firstName} ${lastName}` });
 
     console.log("Calculating zodiac sign...");
-    const zodiacSign = calculateZodiacSign(birthDate);
+    const zodiac = calculateZodiacSign(birthDate);
 
     console.log("Writing user profile to Firestore...");
     const userProfile: UserProfile = {
@@ -108,7 +123,7 @@ export async function signUpWithEmail(userData: SignUpData): Promise<User> {
       lastName,
       birthDate,
       location,
-      zodiacSign,
+      zodiac, // Updated field
       profileComplete: false,
       createdAt: new Date(),
       lastActive: new Date(),
@@ -165,7 +180,6 @@ export async function signInWithGoogle(): Promise<User> {
         createdAt: new Date(),
         lastActive: new Date(),
       };
-
       await setDoc(doc(db, "users", user.uid), userProfile);
     } else {
       // Update last active
@@ -181,7 +195,6 @@ export async function signInWithGoogle(): Promise<User> {
   }
 }
 
-// Sign in with Facebook
 export async function signInWithFacebook(): Promise<User> {
   try {
     const provider = new FacebookAuthProvider();
@@ -202,7 +215,6 @@ export async function signInWithFacebook(): Promise<User> {
         createdAt: new Date(),
         lastActive: new Date(),
       };
-
       await setDoc(doc(db, "users", user.uid), userProfile);
     } else {
       // Update last active
@@ -217,7 +229,6 @@ export async function signInWithFacebook(): Promise<User> {
     throw new Error(getAuthErrorMessage(error.code));
   }
 }
-
 // Sign out
 export async function signOutUser(): Promise<void> {
   try {
@@ -272,9 +283,12 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   }
 }
 
-// Update user profile
 export async function updateUserProfile(uid: string, updates: Partial<UserProfile>): Promise<void> {
   try {
+    // If birthDate is updated, recalculate zodiac
+    if (updates.birthDate) {
+      updates.zodiac = calculateZodiacSign(updates.birthDate);
+    }
     await updateDoc(doc(db, "users", uid), {
       ...updates,
       lastActive: new Date(),

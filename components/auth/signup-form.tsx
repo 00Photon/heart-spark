@@ -121,10 +121,11 @@ export function SignupForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>
-      )}
+    <div className="max-w-xl mx-auto">
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>
+        )}
 
       {/* Name Fields */}
       <div className="grid grid-cols-2 gap-4">
@@ -363,5 +364,6 @@ export function SignupForm() {
         </p>
       </div>
     </form>
+    </div>
   );
 }
