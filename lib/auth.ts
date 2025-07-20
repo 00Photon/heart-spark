@@ -16,7 +16,7 @@ import {
 } from "firebase/auth";
 import { doc, setDoc, getDoc, updateDoc } from "firebase/firestore";
 // In @/lib/auth.ts
-import { ZODIAC_SIGNS } from "@/lib/constants"; // Adjust path as needed
+import { ZODIAC_SIGNS } from "@/lib/constants"; 
 
 import { storage } from "@/lib/firebase";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
